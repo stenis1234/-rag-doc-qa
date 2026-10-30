@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG 文档问答</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <!-- 左侧：知识库 / 上传 / 文档列表 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="dot"></span>
+        <h1>RAG 文档问答</h1>
+      </div>
+
+      <section class="panel">
+        <h2>知识库</h2>
+        <div class="row">
+          <select id="kb-select"></select>
+          <button id="kb-refresh" class="icon" title="刷新">↻</button>
+        </div>
+        <div class="row">
+          <input id="kb-name" type="text" placeholder="新知识库名称" maxlength="64" />
+          <button id="kb-create">新建</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>上传文档</h2>
+        <label class="dropzone" id="dropzone">
+          <!-- 故意不写 accept 过滤：写了之后文件对话框会把不匹配的文件直接隐藏，
+               用户会看到"无与搜索匹配的项"，以为文件不存在。
+               现在改成：所有文件都能看到、都能选，选中后由 app.js 给出明确提示。 -->
+          <input id="file-input" type="file" hidden />
+          <span>点击选择 / 拖到这里 / Ctrl+V 粘贴</span>
+          <small>支持 PDF、DOCX、MD、TXT</small>
+        </label>
+        <div id="job-progress" class="progress hidden">
+          <div class="bar"><i id="job-bar"></i></div>
+          <small id="job-stage">排队中</small>
+        </div>
+      </section>
+
+      <section class="panel grow">
+        <h2>文档 <span id="doc-count" class="muted"></span></h2>
+        <ul id="doc-list" class="doc-list"></ul>
+      </section>
+
+      <div class="footer">
+        <a href="/docs" target="_blank">API 文档</a>
+        <a href="/api/health" target="_blank">健康检查</a>
+      </div>
+    </aside>
+
+    <!-- 右侧：对话 -->
+    <main class="main">
+      <div id="messages" class="messages">
+        <div class="empty" id="empty-hint">
+          <h3>先在左侧选一个知识库</h3>
+          <p>上传文档，等进度条走完，就可以在这里提问了。</p>
+          <p class="muted">答案里的 [1][2] 角标可以点，会显示原文片段。</p>
+        </div>
+      </div>
+
+      <form id="composer" class="composer">
+        <textarea id="question" rows="1" placeholder="问点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button id="send" type="submit">发送</button>
+      </form>
+    </main>
+  </div>
+
+  <!-- 引用原文弹窗 -->
+  <dialog id="chunk-dialog">
+    <div class="dialog-head">
+      <h3 id="chunk-title">原文</h3>
+      <button id="dialog-close" class="icon">✕</button>
+    </div>
+    <p id="chunk-meta" class="muted"></p>
+    <pre id="chunk-content"></pre>
+  </dialog>
+
+  <!-- 文档预览弹窗：点左侧文档名打开 -->
+  <dialog id="doc-dialog">
+    <div class="dialog-head">
+      <h3 id="doc-title">文档</h3>
+      <div class="dialog-actions">
+        <button id="doc-open-file" title="在新标签页打开原始文件">打开原文件</button>
+        <button id="doc-close" class="icon">✕</button>
+      </div>
+    </div>
+    <p id="doc-meta" class="muted"></p>
+    <div id="doc-error" class="doc-error hidden"></div>
+    <div id="doc-body" class="doc-body"></div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

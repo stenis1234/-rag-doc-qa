@@ -1,0 +1,38 @@
+[project]
+name = "ragproject"
+version = "0.1.0"
+description = "文档问答 RAG 项目：FastAPI + Milvus + LangChain 1.x"
+authors = [{ name = "王二", email = "1394411627@qq.com" }]
+# 说明：学习环境用的是 3.14，这里放宽到 3.11 是为了将来接本地模型（torch）
+# 时不被解释器版本卡住。当前代码只用到 3.11 就有的语法。
+requires-python = ">=3.11"
+dependencies = [
+    # --- Web 层 ---
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",   # [standard] 带 uvloop/httptools，SSE 更稳
+    "python-multipart>=0.0.9",   # 上传文件必需
+    # --- 数据层 ---
+    "sqlalchemy>=2.0",
+    "pydantic-settings>=2.4",    # 读 .env
+    # --- 检索层 ---
+    "pymilvus>=2.5",             # 2.5 才有 BM25 Function / hybrid_search
+    "dashscope>=1.20",           # 通义 embedding + rerank
+    # --- 生成层 ---
+    "langchain>=1.4",
+    "langchain-deepseek>=1.1",
+    "langchain-openai>=0.3",     # 兼容任意 OpenAI 协议网关
+    # --- 文档解析 ---
+    "pypdf>=5.0",                # PDF 兜底解析（MinerU 未配置时用）
+    "python-docx>=1.1",
+    # --- 工具 ---
+    "httpx>=0.27",
+    "tenacity>=9.0",             # 调用外部 API 的重试
+]
+
+# 这是一个「应用」不是「库」，不需要打包，uv 不需要 build backend
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
