@@ -1,39 +1,12 @@
 """离线索引链路：文件 → 文本 → chunk → 向量 → Milvus。
 
-==========================================================================================
-这个文件在整个项目里的位置
-==========================================================================================
-    触发方式：api/v1/documents.py 上传成功后，用 BackgroundTasks 丢到后台执行
-    被谁调用：api/v1/documents.py::upload_document() → background_tasks.add_task(...)
-    它调用谁：
-        ingestion/loader.py        load()             按后缀选解析器
-        ingestion/cleaner.py       clean_text()       去脏字符
-        ingestion/splitter.py      split_text()       切块（带字符偏移）
-        indexing/embedding.py      embed_documents()  文本 → 向量
-        indexing/milvus_store.py   upsert()           写向量库
+被谁调用：app/api/v1/documents.py 上传成功后，用 BackgroundTasks 丢到后台执行
+它调用：loader.load → cleaner.clean_text → splitter.split_text
+        → embedding.embed_documents → milvus_store.upsert
 
-==========================================================================================
-为什么用「普通函数 + 后台任务」，而不是 LangGraph？
-==========================================================================================
-判断标准：流程里有没有「根据结果决定下一步」的分支？
-    这里没有。解析→清洗→切分→向量化→写库，是一条直线。
-    直线流程用函数串起来最好读；套上一个图框架只会增加抽象层，
-    让你在调试"为什么第 3 步挂了"的时候还要先理解框架。
-（对比：pipeline/rag.py 的在线链路有"分数低就重查"的分支，那里才值得上图。）
-
-==========================================================================================
-幂等性从哪来（重复上传同一个文件会怎样）
-==========================================================================================
-    1. chunk_id = f"{doc_id}_{seq:05d}" 是**确定性**的
-    2. 写入前先按 doc_id 删干净（Milvus 和关系库都删）
-    ⇒ 同一个文件索引多少次，结果都一样，不会产生重复数据。
-
-==========================================================================================
-进度是怎么上报的
-==========================================================================================
-每完成一步就 `db.commit()` 一次，前端轮询 /api/v1/jobs/{id} 就能看到进度条在动。
-如果攒到最后一次性提交，用户会对着 0% 的进度条干等 20 秒，
-然后突然跳到 100%——体验很差，而且中途出错时你也不知道卡在哪一步。
+流程是直线的（没有「根据结果决定下一步」的分支），所以用普通函数而不是 LangGraph。
+幂等：chunk_id 是确定性的，且写入前按 doc_id 删干净，重复索引结果一致。
+进度：每步 commit 一次，前端轮询 /api/v1/jobs/{id} 才能看到进度条在动。
 """
 
 from __future__ import annotations
@@ -173,7 +146,11 @@ def ingest_document(doc_id: int, job_id: str) -> None:
         # 20 个字符都抽不出来，基本可以判定是扫描件（需要 OCR）或者空文件。
         # 这时候继续走下去只会往库里塞垃圾，不如早早失败并给出明确原因。
         if result.text_length < 20:
-            raise ValueError("没有解析出有效文本（扫描件需要 OCR，或文件本身是空的）")
+            raise ValueError(
+                f"没有解析出有效文本（共 {result.text_length} 个字符）。"
+                "常见原因：扫描件但 OCR 没生效、文件加密、或内容本来就是空的。"
+                f"当前解析器是 {result.parser}；扫描件需要配置 MINERU_TOKEN。"
+            )
 
         doc.page_count = result.page_count
         _update(db, doc, job, progress=20, stage="清洗与切分")
@@ -196,14 +173,20 @@ def ingest_document(doc_id: int, job_id: str) -> None:
             # 代价是跨页的段落会被切开——这是可接受的，
             # 因为"页码准确"对引用的价值，大于"段落完整"。
             for chunk in split_text(
-                text, max_chars=settings.chunk_size, min_chars=settings.chunk_min_size
+                text,
+                max_chars=settings.chunk_size,
+                min_chars=settings.chunk_min_size,
+                overlap=settings.chunk_overlap,
             ):
                 drafts.append(
                     (page.page_no, chunk.title, chunk.content, chunk.char_start, chunk.char_end)
                 )
 
         if not drafts:
-            raise ValueError("切分后没有任何 chunk，请检查文档内容")
+            raise ValueError(
+                "切分后没有得到任何 chunk：可能文本全是空白，或 CHUNK_SIZE / CHUNK_MIN_SIZE 配置异常。"
+                "可以先点文档名看“解析后的文本”确认内容是否正常。"
+            )
 
         log.info("[doc %s] 切出 %d 个 chunk", doc.id, len(drafts))
         _update(db, doc, job, progress=35, stage="向量化")

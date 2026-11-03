@@ -32,7 +32,10 @@ def main() -> int:
 
     if not ping():
         log.error("连不上 Milvus：%s", settings.milvus_uri)
-        log.error("请确认 Milvus 已启动，或检查 .env 里的 MILVUS_URI")
+        log.error(
+            "请确认 Milvus 已启动（默认 127.0.0.1:19530）。"
+            "要换地址就改 .env 里的 MILVUS_URI，没写则用 app/core/config.py 的默认值。"
+        )
         return 1
 
     store = MilvusStore()

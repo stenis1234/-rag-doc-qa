@@ -21,6 +21,8 @@ dependencies = [
     "langchain>=1.4",
     "langchain-deepseek>=1.1",
     "langchain-openai>=0.3",     # 兼容任意 OpenAI 协议网关
+    "langchain-text-splitters>=1.0",  # 官方切分器（按中文标点递归切）
+    "mineru-open-sdk>=0.2.5",   # PDF / DOCX 的版面还原与 OCR
     # --- 文档解析 ---
     "pypdf>=5.0",                # PDF 兜底解析（MinerU 未配置时用）
     "python-docx>=1.1",

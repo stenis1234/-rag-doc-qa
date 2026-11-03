@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.ingestion.loader import SUPPORTED
+from app.ingestion.loader import is_supported, supported_extensions
 from app.models.orm import Chunk, Document, IngestionJob
 from app.services.kb_service import get_kb
 
@@ -33,8 +33,10 @@ def save_upload(
     get_kb(db, kb_id)  # 不存在会抛 KeyError
 
     suffix = Path(filename).suffix.lower()
-    if suffix not in SUPPORTED:
-        raise ValueError(f"不支持的格式 {suffix}，目前支持：{', '.join(SUPPORTED)}")
+    if not is_supported(suffix):
+        raise ValueError(
+            f"不支持的格式 {suffix}，目前支持：{', '.join(supported_extensions())}"
+        )
     if not content:
         raise ValueError("文件内容为空")
 

@@ -1,17 +1,29 @@
-"""docx 解析。
+"""docx 解析：配了 MINERU_TOKEN 就走 MinerU，否则用 python-docx。
 
-python-docx 能读到段落样式，所以这里把 Heading 1/2/3 还原成 Markdown 的 #/##/###，
-交给切分器就能识别出标题层级——不用为 docx 单独写一套结构识别逻辑。
+python-docx 的优点是能读到段落样式，把 Heading 1/2/3 还原成 Markdown 的 #/##/###，
+切分器就能识别标题层级。缺点是表格排版会丢、图片里的文字读不到。
+
+MinerU 对 docx 的版面还原更好，但同样**没有页码**。
+失败直接抛 MineruError，不降级。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from app.ingestion.parsers import mineru
 from app.ingestion.parsers.base import Page, ParseResult
 
 
 def parse(path: Path) -> ParseResult:
+    """解析 docx。MinerU 优先；没配 token 才用 python-docx。"""
+    if mineru.is_enabled():
+        return mineru.parse(path)
+    return _parse_with_python_docx(path)
+
+
+def _parse_with_python_docx(path: Path) -> ParseResult:
+    """读段落 + 表格，把 Heading 样式转成 Markdown 标题。"""
     from docx import Document as DocxDocument
 
     document = DocxDocument(str(path))

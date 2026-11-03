@@ -46,7 +46,11 @@ async def lifespan(app: FastAPI):
         else:
             log.info("collection「%s」共 %d 条", settings.collection, store.count())
     else:
-        log.error("Milvus 连不上（%s），检索相关接口会失败", settings.milvus_uri)
+        log.error(
+            "Milvus 连不上（%s），检索和上传后的索引都会失败。"
+            "请确认 Milvus 已启动；地址在 .env 的 MILVUS_URI 或 config.py 默认值里。",
+            settings.milvus_uri,
+        )
 
     yield
     log.info("退出")

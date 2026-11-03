@@ -158,7 +158,14 @@ async function loadDocs() {
 // 后端真正能解析的格式（和 app/ingestion/loader.py 的 PARSERS 保持一致）。
 // 注意这里不再用 <input accept> 过滤，而是在选中后校验——
 // 否则文件对话框会把不匹配的文件藏起来，用户只会看到"无与搜索匹配的项"。
-const ACCEPTED = [".pdf", ".docx", ".md", ".markdown", ".txt"];
+// 能上传的格式（和 app/ingestion/loader.py 的 supported_extensions() 保持一致）。
+// 其中 ppt/xlsx/doc/图片 依赖 MINERU_TOKEN，没配 token 时后端会返回 400。
+const ACCEPTED = [
+  ".pdf", ".docx", ".doc", ".md", ".markdown", ".txt",
+  ".pptx", ".ppt", ".xlsx", ".xls",
+  ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff",
+  ".html", ".htm",
+];
 
 function fileExt(name) {
   const i = name.lastIndexOf(".");
@@ -177,8 +184,8 @@ async function uploadFile(file) {
     alert(
       `不支持「${ext || "无扩展名"}」格式。\n\n` +
         `目前支持：${ACCEPTED.join("、")}\n\n` +
-        `如果是 .doc / .xlsx / .pptx，请先另存为 PDF 或 .docx 再上传。\n` +
-        `如果是图片（.png / .jpg），需要先 OCR 成文字或转成 PDF。`
+        `如果是 .doc / .xlsx / .pptx，需要先配置 MINERU_TOKEN 才能解析。\n` +
+        `如果是图片（.png / .jpg），同样需要 MINERU_TOKEN 走 OCR。`
     );
     return;
   }

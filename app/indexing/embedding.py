@@ -1,29 +1,12 @@
-"""把文本变成向量（DashScope text-embedding-v3）。
+"""文本向量化（DashScope text-embedding-v3）。
 
-==========================================================================================
-这个文件在整个项目里的位置
-==========================================================================================
-    写入方向：ingestion/pipeline.py  → embed_documents()  一批 chunk → 一批向量
-    检索方向：retrieval/hybrid.py    → embed_query()     一个问题 → 一个向量
-    被谁依赖：indexing/milvus_store.py 只管存，不管怎么算，算都在这儿
+写入：app/ingestion/pipeline.py → embed_documents()
+检索：app/retrieval/hybrid.py   → embed_query()
 
-==========================================================================================
-两个必须记住的坑
-==========================================================================================
-坑 1：文档侧和查询侧必须用**同一个模型、同一个维度**
-    否则两边向量不在同一个语义空间里。表现是「检索能返回结果，但就是不相关」，
-    没有任何报错——这类问题最难查，所以下面加了维度断言。
-
-坑 2：一次请求的条数有上限
-    DashScope 对单次请求的文本条数有限制（text-embedding-v3 大约是 10 条，
-    且总 token 也有限制），所以必须分批。
-
-==========================================================================================
-顺带解释一下 embedding 是什么
-==========================================================================================
-把一段文字映射成 1024 个浮点数。关键性质：**语义相近的文字，向量也相近**。
-所以"猫"和"小猫"的向量距离，比"猫"和"汽车"近。
-检索就是：把问题也变成向量，然后在库里找距离最近的向量。
+两个坑：
+    1. 文档侧和查询侧必须同一个模型、同一个维度，否则两边不在一个语义空间，
+       表现是「检索有结果但都不相关」，且不报错。所以下面加了维度断言。
+    2. DashScope 单次请求条数有上限（约 10 条），必须分批。
 """
 
 from __future__ import annotations
@@ -70,8 +53,8 @@ def _setup_key() -> None:
     """
     if not settings.dashscope_api_key:
         raise EmbeddingError(
-            "缺少 DASHSCOPE_API_KEY。请在 .env 里填上（参考 env.example），"
-            "或直接设置同名环境变量。"
+            "缺少 DASHSCOPE_API_KEY。请在项目根目录的 .env 里填上（参考 env.example），"
+            "或直接设置同名环境变量，然后重启服务。"
         )
     dashscope.api_key = settings.dashscope_api_key
 
@@ -108,12 +91,16 @@ def _call_batch(texts: list[str]) -> list[list[float]]:
         dimension=settings.embed_dim,   # 显式指定维度，避免模型升级后默认值变化
     )
 
-    # DashScope 的错误不是抛异常，而是返回非 200 的 status_code，所以必须手动检查
+    # DashScope 的错误不是抛异常，而是返回非 200（是 DashScope 返回的响应状态码，和 HTTP 状态码一个含义：200 表示成功，其他都是失败）
+    # 的 status_code，所以必须手动检查
     if resp.status_code != 200:
         raise EmbeddingError(f"DashScope embedding 失败 {resp.status_code}: {resp.message}")
 
     embeddings = resp.output["embeddings"]
-
+    # embeddings中每个元素是一个字典，包含两个字段：
+    # [
+    #   {"text_index": 0, "embedding": [-0.0458, 0.0816, -0.0366, ...]},   # 1024 个数
+    #   {"text_index": 1, "embedding": [-0.0312, 0.0554, ...]},      ]      # 1024 个数
     # 服务端返回的顺序**不保证**和输入一致（虽然通常一致），
     # 所以按 text_index 排回去。这一步不做的话，
     # 可能出现"第 1 条文本配了第 2 条的向量"——数据全错但完全不报错。
@@ -131,7 +118,7 @@ class Embedder:
     """
 
     def __init__(self, batch_size: int | None = None):
-        # 不传就用配置里的值（默认 10）
+        # 不传就用配置里的值（默认 10）,batch_size 是“每次调用 API 送多少条文本”。
         self.batch_size = batch_size or settings.embed_batch_size
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -161,8 +148,11 @@ class Embedder:
             for vec in vecs:
                 if len(vec) != settings.embed_dim:
                     raise EmbeddingError(
-                        f"向量维度 {len(vec)} 与配置 EMBED_DIM={settings.embed_dim} 不一致，"
-                        "请检查 .env 里的 EMBED_MODEL / EMBED_DIM 是否匹配。"
+                        f"向量维度对不上：模型 {settings.embed_model} 返回了 {len(vec)} 维，"
+                        f"但配置的 EMBED_DIM 是 {settings.embed_dim}。\n"
+                        "两项配置在 .env 或 app/core/config.py 的默认值里，改完需要：\n"
+                        "  1) 重建 Milvus collection：python scripts/init_milvus.py --drop\n"
+                        "  2) 重新上传文档（旧向量是按旧维度算的）"
                     )
 
             vectors.extend(vecs)

@@ -8,3 +8,5 @@ data/
 *.db
 .pytest_cache/
 .ruff_cache/
+# 工具生成的临时锁文件，不该进仓库
+.dsh-ops-update-*.lock

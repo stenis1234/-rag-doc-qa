@@ -1,36 +1,14 @@
-"""Milvus 的 collection 定义与读写 —— 全项目最该细看的一个文件。
+"""Milvus 的 collection 定义与读写。
 
-==========================================================================================
-这个文件在整个项目里的位置
-==========================================================================================
-它是「向量库」这一层的唯一入口，别人碰 Milvus 都必须经过它：
+写入：app/ingestion/pipeline.py → upsert()
+检索：app/retrieval/hybrid.py  → hybrid_search()
+删除：app/services/*            → delete_by_doc / delete_by_kb
 
-    写入方向：ingestion/pipeline.py::ingest_document()  → 本文件 upsert()
-    检索方向：retrieval/hybrid.py::retrieve()           → 本文件 hybrid_search()
-    删除方向：services/kb_service.py / doc_service.py   → 本文件 delete_by_doc / delete_by_kb
-
-    连接管理在 app/core/milvus.py（只管「连上」，不管 schema）
-
-==========================================================================================
-schema 设计上的四个关键决定（和你学习笔记里的版本相比的改动）
-==========================================================================================
-1) 主键从 INT64 改成 VARCHAR，值形如 "12_00003"（doc_id_序号）
-   好处：确定性 ID。同一个文档重复索引时是**覆盖写**，不会产生重复数据。
-   整数自增主键做不到这点——你可能已经踩过「重新上传后检索到两份旧内容」的坑。
-
-2) 补了 doc_id / kb_id / seq / page_no / char_start / char_end
-   学习笔记里只有 id/h2/content，检索出来只知道「有这段文字」，
-   不知道「来自哪个文件、第几页、第几个字」，所以引用跳转做不了。
-   这几个字段就是让「点角标跳原文」成为可能的东西。
-
-3) dense 改成客户端写入（不再用 TEXTEMBEDDING Function）
-   查询侧本来就是 Python 算向量的，文档侧也走同一套代码，避免
-   「文档用一个模型、查询用另一个模型」这种最难排查的错。
-   代价是插入时要自己传 dense，但换来可测试、可缓存、可换模型。
-
-4) sparse 仍然交给服务端 BM25 Function
-   分词和权重计算是 Milvus 的强项，没必要自己实现，也没必要维护一套 jieba 索引。
-   客户端插入时**不要**传 sparse，传了反而报错。
+schema 的四个要点：
+    1. 主键用 "12_00003" 这种确定性字符串，重复索引就是覆盖写，不会产生脏数据
+    2. 带 doc_id / kb_id / seq / page_no / char_start / char_end，引用才能跳原文
+    3. dense 由客户端算，保证文档侧和查询侧用同一个模型
+    4. sparse 交给服务端 BM25 Function 生成，客户端插入时不要传
 """
 
 from __future__ import annotations
