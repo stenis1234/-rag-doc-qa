@@ -7,6 +7,7 @@
 ![Milvus](https://img.shields.io/badge/Milvus-2.5%2B-00A1EA)
 ![LangChain](https://img.shields.io/badge/LangChain-1.x-1C3C3C)
 ![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ---
 
@@ -345,4 +346,4 @@ SSE 事件类型：`meta`（含 conversation_id）、`token`、`citations`、`wa
 
 ## 十五、许可证
 
-仓库暂未附带 LICENSE 文件。用于学习交流没有问题；如果打算公开或复用，建议补一个 [MIT](https://choosealicense.com/licenses/mit/) 许可证。
+本项目采用 [MIT 许可证](LICENSE)，可以自由使用、修改、分发，包括商业用途，只需保留版权声明。详见 [LICENSE](LICENSE)。
