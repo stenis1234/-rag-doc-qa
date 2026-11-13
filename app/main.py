@@ -98,3 +98,17 @@ def health() -> dict:
 # 必须放在所有路由之后：mount 会兜住所有没匹配上的路径。
 if settings.web_dir.exists():
     app.mount("/", StaticFiles(directory=str(settings.web_dir), html=True), name="web")
+
+
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    """给前端静态资源加 no-store。
+
+    开发时文件频繁改，但 StaticFiles 的缓存头很宽松，浏览器会直接拿缓存，
+    结果就是「代码改了、页面还是旧样子」。这里禁掉缓存，刷新即生效。
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path in ("/", "/index.html") or path.endswith((".js", ".css")):
+        response.headers["Cache-Control"] = "no-store"
+    return response

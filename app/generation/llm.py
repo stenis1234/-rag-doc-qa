@@ -35,6 +35,20 @@ log = get_logger(__name__)
 _model = None
 
 
+def _thinking_payload() -> dict | None:
+    """构造 DeepSeek 的 thinking 参数。
+
+    LLM_THINKING 取值：
+        ""         不传，用服务端默认（可能开启思考，token 消耗大）
+        "disabled" 关闭思考，明显省 token，适合 RAG（答案要忠实资料，不需要长推理）
+        "enabled"  显式开启
+    """
+    mode = (settings.llm_thinking or "").strip().lower()
+    if mode in ("enabled", "disabled"):
+        return {"thinking": {"type": mode}}
+    return None
+
+
 def get_chat_model():
     """返回 ChatModel 实例（进程内复用同一个）。
 
@@ -54,6 +68,8 @@ def get_chat_model():
     if _model is not None:
         return _model
 
+    extra_body = _thinking_payload()
+
     if settings.llm_base_url:
         # 延迟导入：只有走中转时才需要 langchain_openai，
         # 放在模块顶部会让每次 import 都加载它（多几十毫秒启动时间）
@@ -67,20 +83,29 @@ def get_chat_model():
             # temperature 越低越"稳定保守"，RAG 场景建议 0~0.3：
             # 我们要的是"忠实复述资料"，不是"发挥创造力"
             temperature=settings.llm_temperature,
+            **({"extra_body": extra_body} if extra_body else {}),
         )
     else:
         kwargs: dict = {"temperature": settings.llm_temperature}
-        # 只有在 .env 里显式配了 key 才传，否则让 LangChain 自己去读环境变量
-        # （两条路都支持，是为了兼容"用 .env"和"用系统环境变量"两种习惯）
-        if settings.llm_api_key:
-            kwargs["api_key"] = settings.llm_api_key
+        # 优先用 LLM_API_KEY，否则用 .env 里的 DEEPSEEK_API_KEY。
+        # 必须显式传：LangChain 只读环境变量，不会去读我们的 .env 文件。
+        api_key = settings.llm_api_key or getattr(settings, "deepseek_api_key", "")
+        if api_key:
+            kwargs["api_key"] = api_key
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         _model = init_chat_model(
             settings.llm_model,
             model_provider="deepseek",
             **kwargs,
         )
 
-    log.info("使用模型：%s（base_url=%s）", settings.llm_model, settings.llm_base_url or "默认")
+    log.info(
+        "使用模型：%s（base_url=%s，thinking=%s）",
+        settings.llm_model,
+        settings.llm_base_url or "默认",
+        (settings.llm_thinking or "默认"),
+    )
     return _model
 
 
@@ -131,10 +156,23 @@ def stream_text(messages: list[BaseMessage]) -> Iterator[str]:
     """
     # .stream() 是 LangChain ChatModel 的标准方法，返回一个迭代器，
     # 每次产出一个 AIMessageChunk（可以理解为"答案的一个字/几个字"）
+    usage: dict = {}
     for chunk in get_chat_model().stream(messages):
         text = _text_of(chunk)
+        meta = getattr(chunk, "usage_metadata", None)
+        if meta:
+            usage = meta
         if text:  # 跳过空片段：有些模型会先吐一个空 chunk 表示"开始"
             yield text
+
+    # 打一行 token 用量：排查「为什么这么贵」时先看这里
+    if usage:
+        log.info(
+            "生成 token：输入 %s，输出 %s，合计 %s",
+            usage.get("input_tokens"),
+            usage.get("output_tokens"),
+            usage.get("total_tokens"),
+        )
 
 
 def complete_text(messages: list[BaseMessage], max_tokens: int | None = None) -> str:

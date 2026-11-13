@@ -15,7 +15,12 @@ from dataclasses import dataclass, field
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.logging import get_logger
-from app.generation.citation import build_citations, extract_markers, is_grounded
+from app.generation.citation import (
+    build_citations,
+    extract_keywords,
+    extract_markers,
+    is_grounded,
+)
 from app.generation.llm import stream_text
 from app.generation.prompt import REFUSAL_TEXT, build_messages
 from app.indexing.milvus_store import ChunkHit
@@ -31,6 +36,7 @@ class RagEvent:
     """一个流式事件，API 层会塞进 SSE 的 data 字段。
 
     type 取值：meta / token / citations / warning / done / error
+    default_factory=dict表示默认值是空字典
     """
 
     type: str
@@ -45,7 +51,9 @@ class RAGWorkflow:
         question: str,
         kb_ids: list[int],
         history: list[tuple[str, str]] | None = None,
+        summary: str = "",
     ) -> Iterator[RagEvent]:
+        #Iterator（迭代器）就是“能一个一个往外取东西的对象”
         """执行一次问答，边算边 yield。
 
         参数：
@@ -87,7 +95,7 @@ class RAGWorkflow:
 
         # STEP 4 生成：Milvus 只存 doc_id，先补文件名给 prompt 和前端用
         self._attach_doc_names(hits)
-        messages = build_messages(question, hits, history)
+        messages = build_messages(question, hits, history, summary)
 
         # 用原始 question 而不是改写后的 query：回答要针对用户真正问的那句话
         parts: list[str] = []
@@ -100,6 +108,16 @@ class RAGWorkflow:
         # STEP 5 引用：把 [1] 翻译成 chunk + 页码 + 字符偏移
         markers = extract_markers(answer)
         citations = build_citations(hits, markers)
+
+        # 给每条引用附上「与回答重合的词」，前端在原文里高亮它们。
+        # 用 answer 而不是 query：高亮的应该是「支撑这个回答的原文片段」，
+        # 而不是用户问题里碰巧出现的词。
+        for citation in citations:
+            idx = citation["index"]
+            if 1 <= idx <= len(hits):
+                citation["keywords"] = extract_keywords(
+                    answer[:1200], hits[idx - 1].content
+                )
 
         # STEP 6 校验：没有引用说明模型没按规则回答，只提示不重生成（重生成太贵）
         grounded = is_grounded(answer, citations)

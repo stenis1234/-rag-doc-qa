@@ -95,6 +95,68 @@ def build_citations(
     return citations
 
 
+# 按句号/问号/换行切句，保留标点
+_SENTENCE = re.compile(r"[^。！？\n]*[。！？\n]|[^。！？\n]+$")
+# 高亮片段两端要剥掉的符号
+_EDGE_CHARS = " \t\r\n\"'“”‘’()（）[]【】*#-·>"
+
+
+def _bigrams(text: str) -> set[str]:
+    """取所有相邻两字片段，用来粗略衡量两段文字的重合度。"""
+    compact = re.sub(r"\s+", "", text)
+    return {compact[i : i + 2] for i in range(len(compact) - 1)}
+
+
+def extract_keywords(query: str, content: str, max_terms: int = 3) -> list[str]:
+    """从原文里挑出「与回答最相关的整句」，供前端在引用弹窗里高亮。
+
+    做法：
+        1. 把原文按句号/问号/换行切成句子
+        2. 每句与回答比对「两字片段」的重合度，按重合度排序
+        3. 取前几整句返回，前端拿它在原文里做子串高亮
+
+    为什么高亮整句而不是词：回答通常是改写过的，逐词匹配会切出
+    "复更多生""少的负面"这种断词；整句既准确又好读，也直接告诉用户
+    "是这几句支撑了回答"。
+    """
+    if not query or not content:
+        return []
+
+    answer_grams = _bigrams(query)
+    if not answer_grams:
+        return []
+
+    scored: list[tuple[float, str]] = []
+    for raw in _SENTENCE.findall(content):
+        sentence = raw.strip(_EDGE_CHARS)
+        # 长句再按逗号/分号切一次，避免高亮糊成一大段
+        units = (
+            [u.strip(_EDGE_CHARS) for u in re.split(r"[，；、]", sentence)]
+            if len(sentence) > 80
+            else [sentence]
+        )
+        for unit in units:
+            if not 8 <= len(unit) <= 300:
+                continue
+            grams = _bigrams(unit)
+            overlap = len(grams & answer_grams)
+            if overlap < 2:  # 只有一两个字的巧合，不值得高亮
+                continue
+            # 除以长度的平方根，避免长句天然占优
+            scored.append((overlap / (len(grams) ** 0.5), unit))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    chosen: list[str] = []
+    for _, sentence in scored:
+        if any(sentence in existing or existing in sentence for existing in chosen):
+            continue
+        chosen.append(sentence)
+        if len(chosen) >= max_terms:
+            break
+    return chosen
+
+
 def is_grounded(answer: str, citations: list[dict]) -> bool:
     """判断这次回答是否「有据可依」。
 

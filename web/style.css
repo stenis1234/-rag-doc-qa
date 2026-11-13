@@ -37,7 +37,7 @@ body {
   padding: 16px;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .brand { display: flex; align-items: center; gap: 8px; }
@@ -155,6 +155,30 @@ button.icon { padding: 6px 9px; }
 /* ---------- 右侧 ---------- */
 .main { display: flex; flex-direction: column; overflow: hidden; }
 
+.chat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px clamp(16px, 6vw, 80px);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.chat-head .chat-title {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: .04em;
+}
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+button.ghost:hover {
+  color: var(--accent);
+  border-color: var(--border);
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -251,6 +275,14 @@ dialog::backdrop { background: rgba(0, 0, 0, .35); }
   font-family: inherit; font-size: 13px; line-height: 1.7;
 }
 
+/* 引用弹窗里高亮「与问题重合的词」 */
+#chunk-content mark {
+  background: #fff3a3;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
 /* ---------- 文档预览弹窗 ---------- */
 .dialog-actions { display: flex; gap: 8px; align-items: center; }
 
@@ -272,3 +304,15 @@ dialog::backdrop { background: rgba(0, 0, 0, .35); }
   font-size: 13px;
 }
 .doc-error.hidden { display: none; }
+
+/* ---------- 历史会话列表 ---------- */
+/* 不参与伸缩，否则会被下面的「文档」面板挤成 0 高 */
+.conv-panel { flex: 0 0 auto; }
+.conv-list { max-height: 160px; overflow-y: auto; }
+.conv-item.active { background: var(--accent-soft); }
+.conv-item.active .name { color: var(--accent); font-weight: 600; }
+.conv-item .tl {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}

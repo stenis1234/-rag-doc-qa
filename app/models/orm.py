@@ -104,6 +104,10 @@ class Conversation(Base):
     kb_id: Mapped[int] = mapped_column(Integer, index=True)
     # 默认用第一个问题前 30 个字做标题，方便在列表里辨认
     title: Mapped[str] = mapped_column(String(128), default="新会话")
+    # 早期对话的摘要：消息超过阈值后自动生成，每次问答时注入 prompt
+    summary: Mapped[str] = mapped_column(Text, default="")
+    # 摘要已经覆盖到哪条 message.id；<= 这个 id 的消息不再重复摘要
+    summary_until_id: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

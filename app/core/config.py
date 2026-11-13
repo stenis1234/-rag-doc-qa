@@ -93,9 +93,15 @@ class Settings(BaseSettings):
     # 生成（DeepSeek）
     # ======================================================================
     llm_model: str = "deepseek-flash"
-    llm_api_key: str = ""   # 留空则让 LangChain 去读环境变量 DEEPSEEK_API_KEY
+    llm_api_key: str = ""   # 可选：显式指定；留空则用 DEEPSEEK_API_KEY
+    # 直接读 .env 里的 DEEPSEEK_API_KEY（pydantic 不会把它自动塞进环境变量，
+    # 而 LangChain 只认环境变量，所以这里显式接一下）
+    deepseek_api_key: str = ""
     llm_base_url: str = ""  # 走自建网关/中转时填（OpenAI 兼容协议），见 generation/llm.py
     llm_temperature: float = 0.2  # 低温度 = 更忠实复述资料，少发挥
+    # DeepSeek 的思考开关："" 用服务端默认；"disabled" 关闭（省 token，RAG 推荐）；
+    # "enabled" 显式开启。关掉思考后首字更快，也不会出现大段推理消耗。
+    llm_thinking: str = "disabled"
 
     # ======================================================================
     # 切分
@@ -113,10 +119,10 @@ class Settings(BaseSettings):
     # ======================================================================
     # 检索
     # ======================================================================
-    top_k_dense: int = 10     # 稠密路召回条数
-    top_k_sparse: int = 10    # 稀疏（BM25）路召回条数
-    top_k_candidate: int = 14 # 两路融合后、进精排前的候选数
-    top_k_final: int = 5      # 最终进 prompt 的条数
+    top_k_dense: int = 8     # 稠密路召回条数
+    top_k_sparse: int = 8    # 稀疏（BM25）路召回条数
+    top_k_candidate: int = 10 # 两路融合后、进精排前的候选数（精排最慢，候选少一半也更快）
+    top_k_final: int = 4      # 最终进 prompt 的条数（5→4：省 20% 上下文，召回影响很小）
 
     # ---- 两个阈值，很容易混，这里说清楚 ----
     # min_rerank_score  单条候选的「入场券」：低于它直接丢掉，不进 prompt
@@ -133,7 +139,9 @@ class Settings(BaseSettings):
     # 会话
     # ======================================================================
     # 带几轮历史给「改写」节点用。太大不仅费钱，还会让模型被旧话题带偏。
-    history_turns: int = 4
+    history_turns: int = 3
+    # 早期对话压缩成摘要：超过 history_turns*2 条后触发，摘要长度上限
+    summary_max_chars: int = 400
 
     # ======================================================================
     # PDF 解析

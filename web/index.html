@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RAG 文档问答</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/style.css?v=5" />
 </head>
 <body>
   <div class="layout">
@@ -33,14 +33,19 @@
           <!-- 故意不写 accept 过滤：写了之后文件对话框会把不匹配的文件直接隐藏，
                用户会看到"无与搜索匹配的项"，以为文件不存在。
                现在改成：所有文件都能看到、都能选，选中后由 app.js 给出明确提示。 -->
-          <input id="file-input" type="file" hidden />
+          <input id="file-input" type="file" multiple hidden />
           <span>点击选择 / 拖到这里 / Ctrl+V 粘贴</span>
-          <small>PDF / Word / PPT / Excel / 图片 / MD / TXT</small>
+          <small>PDF / Word / PPT / Excel / 图片 / MD / TXT，可多选</small>
         </label>
         <div id="job-progress" class="progress hidden">
           <div class="bar"><i id="job-bar"></i></div>
           <small id="job-stage">排队中</small>
         </div>
+      </section>
+
+      <section class="panel conv-panel">
+        <h2>历史会话 <span id="conv-count" class="muted"></span></h2>
+        <ul id="conv-list" class="doc-list conv-list"></ul>
       </section>
 
       <section class="panel grow">
@@ -56,6 +61,11 @@
 
     <!-- 右侧：对话 -->
     <main class="main">
+      <div class="chat-head">
+        <span class="chat-title">对话</span>
+        <button id="new-chat" class="ghost">+ 新会话</button>
+      </div>
+
       <div id="messages" class="messages">
         <div class="empty" id="empty-hint">
           <h3>先在左侧选一个知识库</h3>
@@ -95,6 +105,6 @@
     <div id="doc-body" class="doc-body"></div>
   </dialog>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=5"></script>
 </body>
 </html>

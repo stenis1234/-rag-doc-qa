@@ -23,13 +23,13 @@ from app.indexing.milvus_store import ChunkHit
 
 log = get_logger(__name__)
 
-
+#这是第三方库 tenacity 的 @retry 装饰器，给函数加“失败自动重试”
 @retry(
     # 精排只重试 2 次（比 embedding 少一次）：
     # 因为它不是关键路径，失败可以降级，没必要让用户多等
-    stop=stop_after_attempt(2),
-    wait=wait_exponential(multiplier=1, min=1, max=4),
-    reraise=True,
+    stop=stop_after_attempt(2),#最多重试两次
+    wait=wait_exponential(multiplier=1, min=1, max=4),#等待时间逐渐增加，第一次重试等待1秒，第二次重试等待2秒，第三次重试等待4秒
+    reraise=True,#重新抛出异常，而不是默认的记录日志
 )
 def _call_rerank(query: str, documents: list[str], top_n: int):
     """调一次精排接口。

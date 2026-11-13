@@ -100,6 +100,8 @@ class Citation(BaseModel):
     char_end: int
     snippet: str            # 截断后的正文，列表里直接展示
     score: float            # 重排分数（没开重排就是融合分数）
+    # 与问题重合的词，前端在引用弹窗里高亮它们
+    keywords: list[str] = []
 
 
 class ChatRequest(BaseModel):
@@ -116,4 +118,15 @@ class ChatMessageOut(BaseModel):
     role: str
     content: str
     citations: list[Citation] = []
+    created_at: datetime
+
+
+class ConversationOut(BaseModel):
+    """会话列表项。"""
+
+    id: int
+    kb_id: int
+    title: str
+    message_count: int
+    last_at: datetime | None = None
     created_at: datetime

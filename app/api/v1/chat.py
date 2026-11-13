@@ -29,7 +29,7 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import DbSession
 
 # 接口的请求/响应模型（Pydantic），负责参数校验和文档生成
-from app.models.schemas import ChatMessageOut, ChatRequest, Citation
+from app.models.schemas import ChatMessageOut, ChatRequest, Citation, ConversationOut
 
 # RagEvent: 流程里产出的事件类型（"token"/"citations"/...）
 from app.pipeline.rag import RagEvent
@@ -155,3 +155,22 @@ def list_messages(conversation_id: int, db: DbSession) -> list[ChatMessageOut]:
             )
         )
     return result
+
+
+@router.get(
+    "/conversations",
+    response_model=list[ConversationOut],
+    summary="会话列表",
+)
+def list_conversations(kb_id: int, db: DbSession) -> list[ConversationOut]:
+    """某个知识库下的历史会话，最新的在前。前端左侧列表用。"""
+    return [ConversationOut(**c) for c in chat_service.list_conversations(db, kb_id)]
+
+
+@router.delete("/conversations/{conversation_id}", summary="删除会话")
+def delete_conversation(conversation_id: int, db: DbSession) -> dict:
+    try:
+        chat_service.delete_conversation(db, conversation_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True}

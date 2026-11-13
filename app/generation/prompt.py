@@ -16,7 +16,7 @@ from __future__ import annotations
 #   HumanMessage   用户这一轮说的话
 #   BaseMessage    上面两者的共同基类，只用于类型标注
 # 它们最终会被模型客户端翻译成 OpenAI 协议的 role=system / role=user 消息。
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 # ---- 项目内部 ----
 # settings: 取 history_turns（带几轮历史）
@@ -34,14 +34,21 @@ from app.indexing.milvus_store import ChunkHit
 #   第 3 条（资料不足时）  → 只写"不许编"不够，要给模型一个"体面退出"的方式
 #   第 4 条（中文+不照抄）→ 不加这句，中文文档会被用英文总结，或者整段复制
 #   第 5 条（矛盾要指出）  → 多文档场景必然出现互相矛盾的说法，让模型挑一个会误导用户
-SYSTEM_PROMPT = """你是一个严谨的文档问答助手。请严格遵守以下规则：
+# 单条资料进 prompt 的最大字符数：块本身约 900 字，全塞进去 5 条就 4500 字，
+# 而回答通常只用得上开头和关键句。
+CONTEXT_CHARS_PER_HIT = 400
+# 历史消息单条最大字符数：助手回答常有七八百字，全量带进 prompt 非常贵。
+HISTORY_CHARS_PER_MSG = 200
 
+
+SYSTEM_PROMPT = """你是一个严谨的文档问答助手。请严格遵守以下规则：
 1. 只能依据「参考资料」回答问题，不要使用你自己的知识补充事实。
 2. 每个结论后面必须标注来源编号，格式为 [1]、[2]，编号对应参考资料。
 3. 如果参考资料中没有足够信息，直接回答「根据现有资料，我无法回答这个问题」，
    并说明缺少什么信息。不要编造，不要猜测。
 4. 用中文回答，条理清晰，必要时用分点陈述；不要整段照抄原文。
-5. 如果不同资料之间存在矛盾，请指出矛盾之处，并分别标注来源。"""
+5. 如果不同资料之间存在矛盾，请指出矛盾之处，并分别标注来源。
+6. 只回答「问题」这一条；历史对话仅供参考，不要复述、追加或纠正你之前的回答。"""
 
 
 def format_context(hits: list[ChunkHit]) -> str:
@@ -80,7 +87,12 @@ def format_context(hits: list[ChunkHit]) -> str:
         title = f"（{hit.title}）" if hit.title else ""
 
         # .strip() 去掉正文首尾空白：prompt 里的多余空行会浪费 token
-        blocks.append(f"[{i}] 来源：{source}{page}{title}\n{hit.content.strip()}")
+        body = hit.content.strip()
+        # 单段资料截断：900 字的块全塞进去，5 条就 4500 字，
+        # 而回答通常只用得上开头和关键句，截到 400 字能省一半以上
+        if len(body) > CONTEXT_CHARS_PER_HIT:
+            body = body[:CONTEXT_CHARS_PER_HIT] + "…"
+        blocks.append(f"[{i}] 来源：{source}{page}{title}\n{body}")
 
     # 用两个换行分隔，比单个换行更容易让模型分清「这是一条新资料」
     return "\n\n".join(blocks)
@@ -90,6 +102,7 @@ def build_messages(
     question: str,
     hits: list[ChunkHit],
     history: list[tuple[str, str]] | None = None,
+    summary: str = "",
 ) -> list[BaseMessage]:
     """组装最终送给模型的消息列表。
 
@@ -107,18 +120,23 @@ def build_messages(
     """
     messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT)]
 
+    # 早期对话的摘要（超过窗口的部分被压成这一段），放在历史之前
+    if summary:
+        messages.append(SystemMessage(content=f"（早前对话的摘要）{summary}"))
+
     # ---- 历史对话 ----
     # 只取最近 history_turns*2 条（一轮 = 用户一条 + 助手一条）。
     # 为什么要截断？历史越长，token 越贵，而且模型注意力会被早期内容分散。
     for role, content in (history or [])[-settings.history_turns * 2 :]:
+        # 历史只保留语义线索，不需要全文——单条截到 200 字
+        clipped = content if len(content) <= HISTORY_CHARS_PER_MSG else content[:HISTORY_CHARS_PER_MSG] + "…"
         if role == "user":
-            messages.append(HumanMessage(content=content))
+            messages.append(HumanMessage(content=clipped))
         else:
-            # 助手的历史回答用 SystemMessage 包一层"（你之前的回答）"，
-            # 而不是原样当 SystemMessage。
-            # 原因：如果直接把旧答案当系统指令，模型会以为"这些结论是既定事实"，
-            # 从而在新问题里沿用旧答案（哪怕新资料已经推翻了它）。
-            messages.append(SystemMessage(content=f"（你之前的回答）{content}"))
+            # 助手的历史回答必须用 AIMessage：
+            # 用 SystemMessage 会让模型把旧答案当成"系统指令/既定事实"，
+            # 结果就是新问题它不答，转而去复述或纠正上一轮的答案。
+            messages.append(AIMessage(content=clipped))
 
     # ---- 本轮 ----
     # 把参考资料放在问题**前面**，是经过考虑的：

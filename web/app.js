@@ -64,14 +64,74 @@ async function loadKbs() {
   const keep = kbs.some((k) => String(k.id) === String(state.kbId)) ? state.kbId : kbs[0].id;
   state.kbId = Number(keep);
   select.value = String(keep);
+  persist();
   await loadDocs();
+}
+
+/* ---------- 会话状态持久化（刷新页面后能恢复） ---------- */
+
+const STORAGE_KEY = "rag-chat-state";
+
+function persist() {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ kbId: state.kbId, conversationId: state.conversationId })
+    );
+  } catch (_) {
+    /* 隐私模式下可能禁用 localStorage，忽略即可 */
+  }
+}
+
+function restore() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    if (saved.kbId) state.kbId = Number(saved.kbId);
+    if (saved.conversationId) state.conversationId = Number(saved.conversationId);
+  } catch (_) {
+    /* 存的内容坏了就当没有 */
+  }
+}
+
+// 拉历史消息并渲染。会话不存在（被删了）就静默开新会话。
+async function loadHistory() {
+  if (!state.conversationId) return;
+  try {
+    const resp = await api(`/api/v1/chat/${state.conversationId}/messages`);
+    const rows = await resp.json();
+    if (!rows.length) return;
+
+    $("#messages").innerHTML = "";
+    for (const msg of rows) {
+      const bubble = appendMessage(msg.role, msg.content);
+      if (msg.role === "assistant") {
+        renderAnswer(bubble, msg.content, msg.citations || []);
+      }
+    }
+  } catch (err) {
+    console.warn("加载历史失败", err);
+    state.conversationId = null;
+    persist();
+  }
+}
+
+function resetChat() {
+  state.conversationId = null;
+  persist();
+  $("#messages").innerHTML =
+    '<div class="empty" id="empty-hint"><h3>新会话</h3><p>直接提问即可。</p></div>';
 }
 
 $("#kb-select").addEventListener("change", async (e) => {
   state.kbId = Number(e.target.value) || null;
   state.conversationId = null; // 换库就开新会话，避免上下文串库
+  persist();
+  resetChat();
   await loadDocs();
+  await loadConversations();
 });
+
+$("#new-chat").addEventListener("click", resetChat);
 
 $("#kb-create").addEventListener("click", async () => {
   const input = $("#kb-name");
@@ -148,6 +208,72 @@ async function loadDocs() {
   renderDocs(await resp.json());
 }
 
+/* ---------- 历史会话 ---------- */
+
+async function loadConversations() {
+  if (!state.kbId) {
+    renderConversations([]);
+    return;
+  }
+  try {
+    const resp = await api(`/api/v1/chat/conversations?kb_id=${state.kbId}`);
+    renderConversations(await resp.json());
+  } catch (err) {
+    console.warn("加载会话列表失败", err);
+  }
+}
+
+function renderConversations(list) {
+  const ul = $("#conv-list");
+  ul.innerHTML = "";
+  $("#conv-count").textContent = list.length ? `(${list.length})` : "";
+
+  for (const conv of list) {
+    const li = document.createElement("li");
+    const active = String(conv.id) === String(state.conversationId);
+    li.className = "conv-item" + (active ? " active" : "");
+
+    const name = document.createElement("span");
+    name.className = "name clickable";
+    name.textContent = conv.title || `会话 #${conv.id}`;
+    name.title = `${conv.message_count} 条消息`;
+    name.addEventListener("click", () => openConversation(conv.id));
+    li.appendChild(name);
+
+    const count = document.createElement("span");
+    count.className = "tl";
+    count.textContent = `${conv.message_count}条`;
+    li.appendChild(count);
+
+    const del = document.createElement("button");
+    del.className = "icon";
+    del.textContent = "✕";
+    del.title = "删除会话";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`删除会话「${conv.title}」？`)) return;
+      try {
+        await api(`/api/v1/chat/conversations/${conv.id}`, { method: "DELETE" });
+        if (String(state.conversationId) === String(conv.id)) resetChat();
+        await loadConversations();
+      } catch (err) {
+        alert("删除失败：" + err.message);
+      }
+    });
+    li.appendChild(del);
+
+    ul.appendChild(li);
+  }
+}
+
+async function openConversation(id) {
+  state.conversationId = id;
+  persist();
+  $("#messages").innerHTML = "";
+  await loadHistory();
+  await loadConversations(); // 刷新高亮
+}
+
 /* ---------- 上传 + 进度轮询 ---------- */
 //
 // 三种入口最后都汇到 uploadFile()：
@@ -211,10 +337,13 @@ async function uploadFile(file) {
   }
 }
 
-$("#file-input").addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  e.target.value = ""; // 清空，允许连续选同一个文件
-  uploadFile(file);
+$("#file-input").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = ""; // 清空，允许连续选同一批文件
+  // 逐个上传：一个传完再传下一个，避免多个进度条互相覆盖
+  for (const file of files) {
+    await uploadFile(file);
+  }
 });
 
 /* ---------- 拖拽上传 ---------- */
@@ -237,7 +366,10 @@ const dropzone = $("#dropzone");
 
 dropzone.addEventListener("drop", (e) => {
   const file = e.dataTransfer?.files?.[0];
-  if (file) uploadFile(file);
+  const files = Array.from(e.dataTransfer?.files || []);
+  (async () => {
+    for (const f of files) await uploadFile(f);
+  })();
 });
 
 /* ---------- 粘贴上传 ----------
@@ -324,10 +456,13 @@ function appendMessage(role, text) {
 
 /** 把答案里的 [1][2] 变成可点击的角标。 */
 function renderAnswer(bubble, text, citations) {
-  const html = escapeHtml(text).replace(
-    /\[(\d{1,2})\]/g,
-    (match, idx) => `<span class="cu" data-idx="${idx}">[${idx}]</span>`
-  );
+  const html = escapeHtml(text)
+    // 模型爱用 markdown 的 **粗体**，不转换的话会原样显示星号
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(
+      /\[(\d{1,2})\]/g,
+      (match, idx) => `<span class="cu" data-idx="${idx}">[${idx}]</span>`
+    );
   bubble.innerHTML = html;
 
   if (citations?.length) {
@@ -340,7 +475,11 @@ function renderAnswer(bubble, text, citations) {
         c.page_no ? " · 第" + c.page_no + "页" : ""
       }`;
       chip.title = c.title || "";
-      chip.addEventListener("click", () => openChunk(c.chunk_id));
+      // 把关键词挂在卡片上，点开原文时用来高亮
+      chip.dataset.keywords = JSON.stringify(c.keywords || []);
+      chip.addEventListener("click", () =>
+        openChunk(c.chunk_id, JSON.parse(chip.dataset.keywords || "[]"))
+      );
       box.appendChild(chip);
     }
     bubble.appendChild(box);
@@ -434,7 +573,26 @@ async function openDoc(docId) {
   docDialog.showModal();
 }
 
-async function openChunk(chunkId) {
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 把原文里的关键词包成 <mark>，让用户一眼看到「哪几个词是我问的」。 */
+function highlightText(text, keywords) {
+  let html = escapeHtml(text || "");
+  const terms = (keywords || [])
+    .filter((k) => k && k.length >= 2)
+    .sort((a, b) => b.length - a.length);
+
+  for (const term of terms) {
+    const pattern = new RegExp(escapeRegExp(escapeHtml(term)), "g");
+    // 已经包过 <mark> 的跳过，避免嵌套
+    html = html.replace(pattern, (m) => `<mark>${m}</mark>`);
+  }
+  return html;
+}
+
+async function openChunk(chunkId, keywords = []) {
   try {
     const resp = await api(`/api/v1/chunks/${encodeURIComponent(chunkId)}`);
     const chunk = await resp.json();
@@ -446,7 +604,8 @@ async function openChunk(chunkId) {
     ]
       .filter(Boolean)
       .join(" · ");
-    $("#chunk-content").textContent = chunk.content;
+    // 用 innerHTML + <mark> 高亮，文本已做过 HTML 转义
+    $("#chunk-content").innerHTML = highlightText(chunk.content, keywords);
     dialog.showModal();
   } catch (err) {
     alert("取原文失败：" + err.message);
@@ -513,6 +672,8 @@ composer.addEventListener("submit", async (e) => {
     await streamChat(question, (event, data) => {
       if (event === "meta" && data.conversation_id) {
         state.conversationId = data.conversation_id;
+        persist();
+        loadConversations(); // 新会话建好了，刷新左侧列表
       } else if (event === "token") {
         answer += data.text || "";
         // 流式过程中用纯文本，避免半截标签；等结束再渲染角标
@@ -592,7 +753,12 @@ async function streamChat(question, onEvent) {
 
 /* ------------------------------------------------------------------ 启动 */
 
-loadKbs().catch((err) => {
+restore();
+
+loadKbs()
+  .then(loadConversations)
+  .then(loadHistory)
+  .catch((err) => {
   console.error(err);
   document.body.insertAdjacentHTML(
     "afterbegin",

@@ -69,3 +69,32 @@ def init_db() -> None:
 
     settings.ensure_dirs()
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
+
+
+def _ensure_columns() -> None:
+    """给已存在的表补新列。
+
+    create_all 只建缺失的表，不会给老表加列；表已经存在时新字段会静默缺失，
+    直到查询时报 “no such column”。这里手工做一次轻量迁移；
+    字段多了以后应该换成 Alembic。
+    """
+    from sqlalchemy import inspect, text
+
+    wanted = {
+        "conversation": [
+            ("summary", "TEXT DEFAULT ''"),
+            ("summary_until_id", "INTEGER DEFAULT 0"),
+        ],
+    }
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in wanted.items():
+            if table not in tables:
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for name, ddl in columns:
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))

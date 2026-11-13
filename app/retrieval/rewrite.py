@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import re
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.generation.llm import complete_text
@@ -62,12 +64,27 @@ def _format_history(history: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+# 出现这些词，才说明问题依赖上文（"它""这个""上面说的"）
+_ANAPHORA = re.compile(
+    r"它|他|她|这个|那个|这些|那些|上面|上述|刚才|前面|这两|这三|该(?:方案|功能|方法|产品)"
+)
+
+
+def needs_rewrite(question: str) -> bool:
+    """问题是否依赖上文。不依赖就不必花一次模型调用去改写。"""
+    return bool(_ANAPHORA.search(question or ""))
+
+
 def condense_question(question: str, history: list[tuple[str, str]]) -> str:
     """把多轮问题改写成独立可检索的问题。
 
-    没有历史就直接返回原问题，省一次模型调用（也省一次钱）。
+    多轮里常见「它有什么好处」这种单独检索没有意义的问题，需要补全主语。
+
+    两个提前返回，都是为了省一次模型调用：
+        - 没有历史：本来就是独立问题
+        - 问题里没有指代词：已经能独立检索，改写大概率原样返回
     """
-    if not history:
+    if not history or not needs_rewrite(question):
         return question
 
     try:
