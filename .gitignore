@@ -4,6 +4,8 @@ __pycache__/
 *.py[cod]
 .idea/
 .env
+# .env 的变体（.env.local / .env.bak / .env.prod…）同样含真实密钥
+.env.*
 data/
 *.db
 .pytest_cache/
